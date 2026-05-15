@@ -40,15 +40,22 @@ You can now augment predictions with a **news web-scraping + LLM** pipeline that
 
 ### Recommended model
 
-**Default: `gpt-4o-mini` (OpenAI)** — cheap (~$0.15 / 1M input tokens), fast, supports strict JSON output, and good enough for headline-level financial sentiment. This is the model we recommend you take a subscription / pay-as-you-go for.
+You can use either provider — pick whichever you have access to:
 
-Alternatives wired through the same `LLMClient` interface:
-- `gemini-1.5-flash` (Google) — generous free tier, 1M-token context.
-- `gpt-4o` or `claude-3-5-sonnet` — higher quality, higher cost. Use only if `gpt-4o-mini` quality isn't sufficient.
+- **`gemini-2.5-flash` (Google)** — recommended default if you have a Google AI Studio key. Fast, cheap, generous free tier, ~1M-token context. Set `model="gemini-3-flash"` to use Gemini 3 Flash when available on your account.
+- **`gpt-4o-mini` (OpenAI)** — strong alternative (~$0.15 / 1M input tokens), reliable JSON mode.
+- **`gpt-4o` / `claude-3-5-sonnet`** — higher quality, higher cost. Use only if Flash/mini quality isn't sufficient.
+
+The pipeline auto-selects a client at runtime: it prefers **Gemini** if `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) is set, then falls back to **OpenAI** if `OPENAI_API_KEY` is set, and finally to a keyword-only signal if neither is configured.
 
 ### Setup
 ```bash
 pip install -r requirements.txt
+
+# Option A: Gemini (recommended)
+export GOOGLE_API_KEY=...
+
+# Option B: OpenAI
 export OPENAI_API_KEY=sk-...
 ```
 
@@ -70,11 +77,11 @@ print(result)
 
 ### What happens under the hood
 1. **Scrape** — `news_scraper.py` pulls fresh headlines from Moneycontrol, ET Markets, Livemint, Reuters, and Yahoo Finance RSS feeds. Items are deduped, filtered to the last 24 hours, capped at 40, and cached on disk for 30 minutes.
-2. **Analyze** — `llm_layer.py` sends the headlines to `gpt-4o-mini` with a strict JSON-mode prompt and parses the response into a `NewsSignal` (`overall_sentiment`, `confidence`, themes, key headlines, summary).
+2. **Analyze** — `llm_layer.py` sends the headlines to the configured LLM (Gemini 2.5/3 Flash or `gpt-4o-mini`) with a strict JSON-mode prompt and parses the response into a `NewsSignal` (`overall_sentiment`, `confidence`, themes, key headlines, summary).
 3. **Predict** — the existing `NiftyNextDayAgent` consumes the `NewsSignal` as an additional, weighted input and includes the LLM summary in the explanation.
 
 ### Graceful degradation
-If `OPENAI_API_KEY` is not set, or the LLM call fails, the pipeline falls back to a keyword-based sentiment signal so a prediction is always returned. The original keyword-only path (`MarketContext(macro_headlines=...)`) continues to work unchanged.
+If neither `GOOGLE_API_KEY` nor `OPENAI_API_KEY` is set, or the LLM call fails, the pipeline falls back to a keyword-based sentiment signal so a prediction is always returned. The original keyword-only path (`MarketContext(macro_headlines=...)`) continues to work unchanged.
 
 ### Swapping providers
-Implement a new subclass of `LLMClient` (see the `GeminiClient` stub in `llm_layer.py`) and pass it as `client=` to `predict_with_news(...)`.
+Both `OpenAIClient` and `GeminiClient` implement the same `LLMClient` interface — pass either as `client=` to `predict_with_news(...)`, or implement your own subclass for Anthropic/etc.

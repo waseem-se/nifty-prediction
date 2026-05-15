@@ -28,6 +28,7 @@ import os
 from typing import Mapping, Sequence
 
 from llm_layer import (
+    GeminiClient,
     LLMClient,
     NewsSignal,
     OpenAIClient,
@@ -41,14 +42,25 @@ logger = logging.getLogger(__name__)
 
 
 def build_default_client() -> LLMClient | None:
-    """Return an :class:`OpenAIClient` if an API key is configured, else None."""
-    if not os.environ.get("OPENAI_API_KEY"):
-        return None
-    try:
-        return OpenAIClient()
-    except Exception as exc:  # pragma: no cover - depends on optional dep
-        logger.warning("Could not create OpenAIClient (%s); using fallback.", exc)
-        return None
+    """Return a configured LLM client based on env vars, else ``None``.
+
+    Preference order:
+    1. ``GOOGLE_API_KEY`` / ``GEMINI_API_KEY`` -> :class:`GeminiClient`
+       (default model ``gemini-2.5-flash``).
+    2. ``OPENAI_API_KEY`` -> :class:`OpenAIClient`
+       (default model ``gpt-4o-mini``).
+    """
+    if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
+        try:
+            return GeminiClient()
+        except Exception as exc:  # pragma: no cover - depends on optional dep
+            logger.warning("Could not create GeminiClient (%s); trying OpenAI.", exc)
+    if os.environ.get("OPENAI_API_KEY"):
+        try:
+            return OpenAIClient()
+        except Exception as exc:  # pragma: no cover - depends on optional dep
+            logger.warning("Could not create OpenAIClient (%s); using fallback.", exc)
+    return None
 
 
 def predict_with_news(

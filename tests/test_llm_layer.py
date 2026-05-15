@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Sequence
 
 from llm_layer import (
+    GeminiClient,
     LLMClient,
     NewsSignal,
     analyze_with_fallback,
@@ -120,6 +121,58 @@ class TestAnalyzeWithFallback(unittest.TestCase):
     def test_no_client_uses_keyword_fallback(self) -> None:
         signal = analyze_with_fallback(_items(), client=None)
         self.assertEqual(signal.source, "fallback")
+
+
+class _FakeGeminiResponse:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _FakeGeminiModels:
+    def __init__(self, payload: str) -> None:
+        self.payload = payload
+        self.calls: list[dict] = []
+
+    def generate_content(self, **kwargs):  # noqa: ANN003
+        self.calls.append(kwargs)
+        return _FakeGeminiResponse(self.payload)
+
+
+class _FakeGeminiSDK:
+    def __init__(self, payload: str) -> None:
+        self.models = _FakeGeminiModels(payload)
+
+
+class TestGeminiClient(unittest.TestCase):
+    def test_returns_parsed_signal(self) -> None:
+        fake_sdk = _FakeGeminiSDK(
+            '{"overall_sentiment": 0.4, "confidence": 0.6, "summary": "mild bull"}'
+        )
+        client = GeminiClient(model="gemini-2.5-flash", client=fake_sdk)
+        signal = client.analyze_news(_items())
+        self.assertEqual(signal.source, "llm")
+        self.assertAlmostEqual(signal.overall_sentiment, 0.4)
+        self.assertEqual(len(fake_sdk.models.calls), 1)
+        self.assertEqual(fake_sdk.models.calls[0]["model"], "gemini-2.5-flash")
+        self.assertEqual(
+            fake_sdk.models.calls[0]["config"]["response_mime_type"],
+            "application/json",
+        )
+
+    def test_empty_items_short_circuits(self) -> None:
+        fake_sdk = _FakeGeminiSDK("{}")
+        client = GeminiClient(client=fake_sdk)
+        signal = client.analyze_news([])
+        self.assertEqual(signal.source, "empty")
+        self.assertEqual(fake_sdk.models.calls, [])
+
+    def test_supports_gemini_3_flash_model(self) -> None:
+        fake_sdk = _FakeGeminiSDK(
+            '{"overall_sentiment": -0.2, "confidence": 0.5, "summary": "x"}'
+        )
+        client = GeminiClient(model="gemini-3-flash", client=fake_sdk)
+        client.analyze_news(_items())
+        self.assertEqual(fake_sdk.models.calls[0]["model"], "gemini-3-flash")
 
 
 if __name__ == "__main__":

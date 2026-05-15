@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_MAX_RETRIES = 2
 
@@ -288,22 +289,81 @@ class OpenAIClient(LLMClient):
         raise RuntimeError(f"OpenAI request failed: {last_error}")
 
 
-class GeminiClient(LLMClient):  # pragma: no cover - stub for future use
-    """Stub Gemini client. Provided as a swap-in alternative.
+class GeminiClient(LLMClient):
+    """Google Gemini-backed LLM client.
 
-    To enable, install ``google-generativeai`` and implement
-    :meth:`analyze_news` using the same prompt + ``parse_signal_json``.
+    Defaults to ``gemini-2.5-flash`` (GA, fast, generous context window,
+    free tier available). Pass ``model="gemini-3-flash"`` to use the newer
+    Gemini 3 Flash model when available on your account. Uses the
+    unified ``google-genai`` SDK with JSON-mode output.
     """
 
-    def __init__(self, api_key: str | None = None, model: str = "gemini-1.5-flash") -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = DEFAULT_GEMINI_MODEL,
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        client: object | None = None,
+    ) -> None:
         self.model = model
-        self.api_key = api_key or os.environ.get("GOOGLE_API_KEY")
+        self.timeout = timeout
+        self.max_retries = max_retries
+        if client is not None:
+            self._client = client
+            return
+
+        key = api_key or os.environ.get("GOOGLE_API_KEY") or os.environ.get(
+            "GEMINI_API_KEY"
+        )
+        if not key:
+            raise RuntimeError(
+                "GOOGLE_API_KEY (or GEMINI_API_KEY) is not set. "
+                "Export it or pass api_key explicitly."
+            )
+        try:
+            from google import genai  # type: ignore
+        except ImportError as exc:  # pragma: no cover - dep-dependent
+            raise RuntimeError(
+                "The 'google-genai' package is required for GeminiClient. "
+                "Install with: pip install google-genai"
+            ) from exc
+        self._client = genai.Client(api_key=key)
 
     def analyze_news(self, items: Sequence[NewsItem]) -> NewsSignal:
-        raise NotImplementedError(
-            "GeminiClient is a stub. Implement analyze_news using "
-            "google.generativeai with the same prompt and parse_signal_json."
+        if not items:
+            return NewsSignal(
+                overall_sentiment=0.0,
+                confidence=0.0,
+                summary="No news available.",
+                source="empty",
+            )
+
+        prompt = (
+            SYSTEM_PROMPT
+            + "\n\n"
+            + USER_PROMPT_TEMPLATE.format(news_block=_format_news_block(items))
         )
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = self._client.models.generate_content(  # type: ignore[attr-defined]
+                    model=self.model,
+                    contents=prompt,
+                    config={
+                        "response_mime_type": "application/json",
+                        "temperature": 0.2,
+                    },
+                )
+                content = getattr(response, "text", None) or ""
+                return parse_signal_json(content or "{}")
+            except Exception as exc:  # pragma: no cover - network-dependent
+                last_error = exc
+                logger.warning(
+                    "Gemini call failed (attempt %s/%s): %s",
+                    attempt + 1, self.max_retries + 1, exc,
+                )
+        raise RuntimeError(f"Gemini request failed: {last_error}")
 
 
 def analyze_with_fallback(
