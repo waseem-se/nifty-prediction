@@ -67,6 +67,32 @@ class TestNiftyNextDayAgent(unittest.TestCase):
         self.assertEqual(result["movement"], "sideways")
         self.assertEqual(result["score"], 0.0)
 
+    def test_mixed_headline_does_not_shift_nonzero_market_score(self) -> None:
+        base_context = MarketContext(
+            us_market_change_pct=0.6,
+            europe_market_change_pct=0.4,
+            asia_market_change_pct=0.2,
+            crude_oil_change_pct=0.0,
+            usd_inr_change_pct=0.0,
+            vix_change_pct=0.0,
+            fii_flow_crore=0.0,
+        )
+        with_mixed_headline = self.agent.predict(
+            MarketContext(
+                us_market_change_pct=base_context.us_market_change_pct,
+                europe_market_change_pct=base_context.europe_market_change_pct,
+                asia_market_change_pct=base_context.asia_market_change_pct,
+                crude_oil_change_pct=base_context.crude_oil_change_pct,
+                usd_inr_change_pct=base_context.usd_inr_change_pct,
+                vix_change_pct=base_context.vix_change_pct,
+                fii_flow_crore=base_context.fii_flow_crore,
+                macro_headlines=("Ceasefire hopes amid war concerns",),
+            )
+        )
+        without_headline = self.agent.predict(base_context)
+
+        self.assertEqual(with_mixed_headline["score"], without_headline["score"])
+
 
 if __name__ == "__main__":
     unittest.main()
