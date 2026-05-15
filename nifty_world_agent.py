@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from llm_layer import NewsSignal
 
 
 @dataclass(frozen=True)
@@ -18,6 +21,7 @@ class MarketContext:
     vix_change_pct: float = 0.0
     fii_flow_crore: float = 0.0
     macro_headlines: tuple[str, ...] = ()
+    news_signal: Optional["NewsSignal"] = None
 
 
 class NiftyNextDayAgent:
@@ -27,6 +31,10 @@ class NiftyNextDayAgent:
     MAX_CONFIDENCE = 95.0
     BASE_CONFIDENCE = 50.0
     CONFIDENCE_MULTIPLIER = 12.0
+    # Weight applied to the LLM-derived news signal when present. Tuned so
+    # a high-confidence, strong sentiment (e.g. +0.8 sentiment * 0.9 conf)
+    # contributes ~1.1 to score — comparable to a single macro factor.
+    NEWS_SIGNAL_MULTIPLIER = 1.5
 
     POSITIVE_KEYWORDS = {
         "rate cut",
@@ -82,6 +90,22 @@ class NiftyNextDayAgent:
         score += headline_score
         if headline_score:
             reasons.append(f"Headline sentiment contribution: {headline_score:.2f}")
+
+        if context.news_signal is not None:
+            news_contribution = (
+                context.news_signal.overall_sentiment
+                * context.news_signal.confidence
+                * self.NEWS_SIGNAL_MULTIPLIER
+            )
+            score += news_contribution
+            reasons.append(
+                f"LLM news contribution: {news_contribution:.2f} "
+                f"(sentiment={context.news_signal.overall_sentiment:+.2f}, "
+                f"confidence={context.news_signal.confidence:.2f}, "
+                f"source={context.news_signal.source})"
+            )
+            if context.news_signal.summary:
+                reasons.append(f"News summary: {context.news_signal.summary}")
 
         if score > 1.0:
             movement = "up"
