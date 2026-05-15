@@ -23,6 +23,11 @@ class MarketContext:
 class NiftyNextDayAgent:
     """Simple explainable agent that predicts next-day NIFTY direction."""
 
+    MIN_CONFIDENCE = 35.0
+    MAX_CONFIDENCE = 95.0
+    BASE_CONFIDENCE = 50.0
+    CONFIDENCE_MULTIPLIER = 12.0
+
     POSITIVE_KEYWORDS = {
         "rate cut",
         "cooling inflation",
@@ -85,7 +90,10 @@ class NiftyNextDayAgent:
         else:
             movement = "sideways"
 
-        confidence = min(95.0, max(35.0, 50.0 + abs(score) * 12.0))
+        confidence = min(
+            self.MAX_CONFIDENCE,
+            max(self.MIN_CONFIDENCE, self.BASE_CONFIDENCE + abs(score) * self.CONFIDENCE_MULTIPLIER),
+        )
 
         return {
             "movement": movement,
@@ -98,9 +106,11 @@ class NiftyNextDayAgent:
         score = 0.0
         for headline in headlines:
             normalized = headline.lower()
-            if any(token in normalized for token in self.POSITIVE_KEYWORDS):
+            has_positive = any(token in normalized for token in self.POSITIVE_KEYWORDS)
+            has_negative = any(token in normalized for token in self.NEGATIVE_KEYWORDS)
+            if has_positive and not has_negative:
                 score += 0.8
-            if any(token in normalized for token in self.NEGATIVE_KEYWORDS):
+            elif has_negative and not has_positive:
                 score -= 0.8
         return score
 
