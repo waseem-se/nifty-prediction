@@ -34,7 +34,7 @@ class TestNiftyNextDayAgent(unittest.TestCase):
                 usd_inr_change_pct=0.6,
                 vix_change_pct=8.0,
                 fii_flow_crore=-3000,
-                macro_headlines=("War escalation and hot inflation",),
+                macro_headlines=("War and recession fears with hot inflation",),
             )
         )
 
@@ -56,6 +56,16 @@ class TestNiftyNextDayAgent(unittest.TestCase):
         )
 
         self.assertEqual(result["movement"], "sideways")
+
+    def test_mixed_sentiment_headline_is_treated_as_neutral(self) -> None:
+        result = self.agent.predict(
+            MarketContext(
+                macro_headlines=("Ceasefire hopes amid war concerns",),
+            )
+        )
+
+        self.assertEqual(result["movement"], "sideways")
+        self.assertEqual(result["score"], 0.0)
 
 
 if __name__ == "__main__":
